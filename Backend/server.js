@@ -37,7 +37,6 @@ app.use(cors());
 //Routes
 
 // REGISTER
-//POST REGISTER
 app.post("/register", async (req, res) => {
   try {
     const { email, username, password, image } = req.body;
@@ -102,7 +101,8 @@ app.post("/login", async (req, res) => {
 app.post("/tasks/:userId", async (req, res) => {
   try {
     const creatorUserId = req.params.userId;
-    const { title, content, status, deadlineTime, assigned } = req.body;
+    const { title, content, status, createdTime, deadlineTime, assigned } =
+      req.body;
 
     // Find the creator user by userId
     const creatorUser = await User.findById(creatorUserId);
@@ -116,7 +116,7 @@ app.post("/tasks/:userId", async (req, res) => {
       title,
       content,
       status,
-      createdTime: new Date(),
+      createdTime,
       deadlineTime,
       assigned,
       createdBy: creatorUserId,
@@ -147,7 +147,7 @@ app.post("/tasks/:userId", async (req, res) => {
 });
 
 // GET a user by ID
-app.get("/users/:userId", async (req, res) => {
+app.get("/user/:userId", async (req, res) => {
   try {
     const userId = req.params.userId;
 
@@ -162,5 +162,199 @@ app.get("/users/:userId", async (req, res) => {
   } catch (error) {
     console.error("Error getting user:", error);
     res.status(500).json({ error: "Error getting user" });
+  }
+});
+
+//endpoint to access all the users except the user who's is currently logged in!
+app.get("/users/:userId", (req, res) => {
+  const loggedInUserId = req.params.userId;
+
+  User.find({ _id: { $ne: loggedInUserId } })
+    .then((users) => {
+      res.status(200).json(users);
+    })
+    .catch((err) => {
+      console.log("Error retrieving users", err);
+      res.status(500).json({ message: "Error retrieving users" });
+    });
+});
+
+//endpoint to send a request to a user
+app.post("/friend-request", async (req, res) => {
+  const { currentUserId, selectedUserId } = req.body;
+
+  try {
+    //update the recepient's friendRequestsArray!
+    await User.findByIdAndUpdate(selectedUserId, {
+      $push: { freindRequests: currentUserId },
+    });
+
+    //update the sender's sentFriendRequests array
+    await User.findByIdAndUpdate(currentUserId, {
+      $push: { sentFriendRequests: selectedUserId },
+    });
+
+    res.sendStatus(200);
+  } catch (error) {
+    res.sendStatus(500);
+  }
+});
+
+//endpoint to show all the friend-requests of a particular user
+app.get("/friend-request/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    //fetch the user document based on the User id
+    const user = await User.findById(userId);
+
+    const freindRequests = user.freindRequests;
+
+    res.json(freindRequests);
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+});
+
+//endpoint to accept a friend-request of a particular person
+app.post("/friend-request/accept", async (req, res) => {
+  try {
+    const { senderId, recepientId } = req.body;
+
+    //retrieve the documents of sender and the recipient
+    const sender = await User.findById(senderId);
+    const recepient = await User.findById(recepientId);
+
+    sender.friends.push(recepientId);
+    recepient.friends.push(senderId);
+
+    recepient.freindRequests = recepient.freindRequests.filter(
+      (request) => request.toString() !== senderId.toString()
+    );
+
+    sender.sentFriendRequests = sender.sentFriendRequests.filter(
+      (request) => request.toString() !== recepientId.toString
+    );
+
+    await sender.save();
+    await recepient.save();
+
+    res.status(200).json({ message: "Friend Request accepted successfully" });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+});
+
+//endpoint to access all the friends of the logged in user!
+app.get("/accepted-friends/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const user = await User.findById(userId).populate(
+      "friends",
+      "username email image"
+    );
+    const acceptedFriends = user.friends;
+    res.json(acceptedFriends);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+const multer = require("multer");
+const Message = require("./models/messageModel");
+const Organization = require("./models/organizationModel");
+
+// Configure multer for handling file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, "storage/"); // Specify the desired destination folder
+  },
+  filename: function (req, file, cb) {
+    // Generate a unique filename for the uploaded file
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + "-" + file.originalname);
+  },
+});
+
+const upload = multer({ storage: storage });
+
+//endpoint to post Messages and store it in the backend
+app.post("/messages", upload.single("imageFile"), async (req, res) => {
+  try {
+    const { senderId, recepientId, messageType, messageText } = req.body;
+
+    const newMessage = new Message({
+      senderId,
+      recepientId,
+      messageType,
+      message: messageText,
+      timestamp: new Date(),
+      imageUrl: messageType === "image" ? req.file.path : null,
+    });
+
+    await newMessage.save();
+    res.status(200).json({ message: "Message sent Successfully" });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+//enpoint for create organization
+app.post("/organizations", async (req, res) => {
+  try {
+    const { name, image, members, admin } = req.body;
+
+    // Create a new organization
+    const newOrganization = new Organization({
+      name,
+      image,
+      members: [],
+      admin,
+    });
+
+    // Validate and add members
+    const validMembers = [];
+
+    for (const memberId of members) {
+      const user = await User.findById(memberId);
+
+      if (user) {
+        validMembers.push(memberId);
+        // Update the user's data to include the organization
+        user.organizations.push({
+          organizationId: newOrganization._id,
+          role: memberId === admin ? "admin" : "member",
+        });
+        await user.save();
+      }
+    }
+
+    // Update the organization with the valid members
+    newOrganization.members = validMembers;
+
+    // Save the organization to the database
+    await newOrganization.save();
+
+    // Update the admin's data to include the organization
+    const adminUser = await User.findById(admin);
+    if (adminUser) {
+      adminUser.organizations.push({
+        organizationId: newOrganization._id,
+        role: "admin",
+      });
+      await adminUser.save();
+    }
+
+    res.status(201).json({
+      message: "Organization created successfully",
+      organization: newOrganization,
+    });
+  } catch (error) {
+    console.error("Error creating organization:", error);
+    res.status(500).json({ error: "Error creating organization" });
   }
 });
