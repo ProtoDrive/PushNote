@@ -16,6 +16,36 @@ const userSchema = new mongoose.Schema({
       createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     },
   ],
+  freindRequests: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+  ],
+  friends: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+  ],
+  sentFriendRequests: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+  ],
+  organizations: [
+    {
+      organizationId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Organization",
+      },
+      role: {
+        type: String,
+        enum: ["admin", "member"],
+      },
+    },
+  ],
 });
 
 const User = mongoose.model("User", userSchema);
