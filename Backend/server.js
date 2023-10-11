@@ -34,9 +34,38 @@ mongoose
 app.use(bodyParser.json());
 app.use(cors());
 
+/**
+ * enpoint for storage the file of image using multer package
+ * @constructor
+ */
+const multer = require("multer");
+const Message = require("./models/messageModel");
+const Organization = require("./models/organizationModel");
+
+// Configure multer for handling file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, "storage/"); // Specify the desired destination folder
+  },
+  filename: function (req, file, cb) {
+    // Generate a unique filename for the uploaded file
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + "-" + file.originalname);
+  },
+});
+
+const upload = multer({ storage: storage });
+
 //Routes
 
-// REGISTER
+/**
+ * Register the user.
+ * @constructor
+ * @param {string} email - The email of the user.
+ * @param {string} username - The username of the user.
+ * @param {string} password - The password of the user.
+ * @param {string} image - The image url of the user.
+ */
 app.post("/register", async (req, res) => {
   try {
     const { email, username, password, image } = req.body;
@@ -60,17 +89,12 @@ app.post("/register", async (req, res) => {
   }
 });
 
-//GET Registered Users
-app.get("/register", async (req, res) => {
-  try {
-    const users = await User.find();
-    res.status(201).json(users);
-  } catch (error) {
-    res.status(500).json({ error: "Unable to get users" });
-  }
-});
-
-//LOGIN
+/**
+ * Login the user.
+ * @constructor
+ * @param {string} email - The email of the user.
+ * @param {string} password - The password of the user.
+ */
 app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -97,56 +121,24 @@ app.post("/login", async (req, res) => {
   }
 });
 
-// POST a new task for a user
-app.post("/tasks/:userId", async (req, res) => {
+/**
+ * Get the all register users.
+ * @constructor
+ */
+app.get("/register", async (req, res) => {
   try {
-    const creatorUserId = req.params.userId;
-    const { title, content, status, createdTime, deadlineTime, assigned } =
-      req.body;
-
-    // Find the creator user by userId
-    const creatorUser = await User.findById(creatorUserId);
-
-    if (!creatorUser) {
-      return res.status(404).json({ error: "Creator user not found" });
-    }
-
-    // Create a new task with the assigned user's ObjectId
-    const newTask = {
-      title,
-      content,
-      status,
-      createdTime,
-      deadlineTime,
-      assigned,
-      createdBy: creatorUserId,
-    };
-
-    // Push the task's ObjectId to the creator user's task array
-    creatorUser.task.push(newTask);
-    await creatorUser.save();
-
-    // Find the assigned user by userId
-    const assignedUser = await User.findById(assigned);
-
-    if (!assignedUser) {
-      return res.status(404).json({ error: "Assigned user not found" });
-    }
-
-    // Push the task's ObjectId to the assigned user's task array
-    assignedUser.task.push(newTask);
-    await assignedUser.save();
-
-    res
-      .status(201)
-      .json({ message: "Task created successfully", task: newTask });
+    const users = await User.find();
+    res.status(201).json(users);
   } catch (error) {
-    console.error("Error creating task:", error);
-    res.status(500).json({ error: "Error creating task" });
+    res.status(500).json({ error: "Unable to get users" });
   }
 });
 
-// GET a user by ID
+/**
+ * GET a user by ID.
+ * @constructor
+ * @param {string} userId - The userId of the user.
+ */
 app.get("/user/:userId", async (req, res) => {
   try {
     const userId = req.params.userId;
@@ -165,7 +157,11 @@ app.get("/user/:userId", async (req, res) => {
   }
 });
 
-//endpoint to access all the users except the user who's is currently logged in!
+/**
+ * endpoint to access all the users except the user who's is currently logged in!
+ * @constructor
+ * @param {string} userId - The userId of the user.
+ */
 app.get("/users/:userId", (req, res) => {
   const loggedInUserId = req.params.userId;
 
@@ -179,7 +175,12 @@ app.get("/users/:userId", (req, res) => {
     });
 });
 
-//endpoint to send a request to a user
+/**
+ * endpoint to send a request to a user
+ * @constructor
+ * @param {string} currentUserId - The currentUserId of the user who currently logged in.
+ * @param {string} selectedUserId - The selectedUserId of the user whom to send friend request.
+ */
 app.post("/friend-request", async (req, res) => {
   const { currentUserId, selectedUserId } = req.body;
 
@@ -200,7 +201,11 @@ app.post("/friend-request", async (req, res) => {
   }
 });
 
-//endpoint to show all the friend-requests of a particular user
+/**
+ * endpoint to show all the friend-requests of a particular user
+ * @constructor
+ * @param {string} userId - The userId of the user.
+ */
 app.get("/friend-request/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
@@ -217,7 +222,12 @@ app.get("/friend-request/:userId", async (req, res) => {
   }
 });
 
-//endpoint to accept a friend-request of a particular person
+/**
+ * endpoint to accept a friend-request of a particular person
+ * @constructor
+ * @param {string} senderId - The senderId of the user who send friend request.
+ * @param {string} recepientId - The recepientId of the user who recived the friend request.
+ */
 app.post("/friend-request/accept", async (req, res) => {
   try {
     const { senderId, recepientId } = req.body;
@@ -247,7 +257,11 @@ app.post("/friend-request/accept", async (req, res) => {
   }
 });
 
-//endpoint to access all the friends of the logged in user!
+/**
+ * endpoint to access all the friends of the logged in user!
+ * @constructor
+ * @param {string} userId - The userId of the user.
+ */
 app.get("/accepted-friends/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
@@ -263,47 +277,14 @@ app.get("/accepted-friends/:userId", async (req, res) => {
   }
 });
 
-const multer = require("multer");
-const Message = require("./models/messageModel");
-const Organization = require("./models/organizationModel");
-
-// Configure multer for handling file uploads
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, "storage/"); // Specify the desired destination folder
-  },
-  filename: function (req, file, cb) {
-    // Generate a unique filename for the uploaded file
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + "-" + file.originalname);
-  },
-});
-
-const upload = multer({ storage: storage });
-
-//endpoint to post Messages and store it in the backend
-app.post("/messages", upload.single("imageFile"), async (req, res) => {
-  try {
-    const { senderId, recepientId, messageType, messageText } = req.body;
-
-    const newMessage = new Message({
-      senderId,
-      recepientId,
-      messageType,
-      message: messageText,
-      timestamp: new Date(),
-      imageUrl: messageType === "image" ? req.file.path : null,
-    });
-
-    await newMessage.save();
-    res.status(200).json({ message: "Message sent Successfully" });
-  } catch (error) {
-    console.log(error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-});
-
-//enpoint for create organization
+/**
+ * enpoint for create organization
+ * @constructor
+ * @param {string} name - The name of the organization.
+ * @param {string} image - The image of the organization.
+ * @param {array} members - The members of the organization.
+ * @param {object} admin - The admin of the organization.
+ */
 app.post("/organizations", async (req, res) => {
   try {
     const { name, image, members, admin } = req.body;
@@ -356,5 +337,94 @@ app.post("/organizations", async (req, res) => {
   } catch (error) {
     console.error("Error creating organization:", error);
     res.status(500).json({ error: "Error creating organization" });
+  }
+});
+
+/**
+ * Create or schedule a task for a member
+ * @constructor
+ * @param {string} title - The title of the task.
+ * @param {string} content - The content of the task.
+ * @param {string} status - The status of the task (progress, completed, incompleted).
+ * @param {string} createdTime - The time of the task created.
+ * @param {string} deadlineTime - The deadline of the task.
+ * @param {string} assigned - The task assigned to user.
+ */
+app.post("/tasks/:userId", async (req, res) => {
+  try {
+    const creatorUserId = req.params.userId;
+    const { title, content, status, createdTime, deadlineTime, assigned } =
+      req.body;
+
+    // Find the creator user by userId
+    const creatorUser = await User.findById(creatorUserId);
+
+    if (!creatorUser) {
+      return res.status(404).json({ error: "Creator user not found" });
+    }
+
+    // Create a new task with the assigned user's ObjectId
+    const newTask = {
+      title,
+      content,
+      status,
+      createdTime,
+      deadlineTime,
+      assigned,
+      createdBy: creatorUserId,
+    };
+
+    // Push the task's ObjectId to the creator user's task array
+    creatorUser.task.push(newTask);
+    await creatorUser.save();
+
+    // Find the assigned user by userId
+    const assignedUser = await User.findById(assigned);
+
+    if (!assignedUser) {
+      return res.status(404).json({ error: "Assigned user not found" });
+    }
+
+    // Push the task's ObjectId to the assigned user's task array
+    assignedUser.task.push(newTask);
+    await assignedUser.save();
+
+    res
+      .status(201)
+      .json({ message: "Task created successfully", task: newTask });
+  } catch (error) {
+    console.error("Error creating task:", error);
+    res.status(500).json({ error: "Error creating task" });
+  }
+});
+
+/**
+ * endpoint to post Messages and store it in the backend
+ * @constructor
+ * @param {string} senderId - The senderId of the user who sending msg.
+ * @param {string} recepientId - The recepientId of the user who recived msg.
+ * @param {string} messageType - The messageType of msg can be text or image msg.
+ * @param {string} messageText - The messageText is the content of msg.
+ * @param {string} timestamp - The timestamp when msg send.
+ * @param {string} imageUrl - The imageUrl of the msg if it's present.
+ */
+app.post("/messages", upload.single("imageFile"), async (req, res) => {
+  try {
+    const { senderId, recepientId, messageType, messageText } = req.body;
+
+    const newMessage = new Message({
+      senderId,
+      recepientId,
+      messageType,
+      message: messageText,
+      timestamp: new Date(),
+      imageUrl: messageType === "image" ? req.file.path : null,
+    });
+
+    await newMessage.save();
+    res.status(200).json({ message: "Message sent Successfully" });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
