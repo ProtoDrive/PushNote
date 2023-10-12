@@ -34,10 +34,15 @@ npm install
 
 ### 5. For testing purpose 💥
 
-Copy the following content and create a `.env` file in the project root directory. Fill in the `MONGO_URI` with your MongoDB connection string.
+Copy the following content from `.env.sample` file and create a `.env` file in the project root directory of Backend folder. Fill the all key values.<br/>
+For twilio values login to [twilio](https://www.twilio.com/login)
 
 ```env
-MONGO_URI=your-mongodb-connection-string
+MONGO_URI=<your_mongodb_url>
+ACCOUNT_SID=<your_twilio_accound_sid>
+AUTH_TOKEN=<your_twilio_accound_sid>
+SMS_SECRET_KEY=<your_sms_secret_key>
+TWILIO_PHONE_NUMBER=<your_twilio_accound_phoneNo>
 ```
 
 ### 6. Launch the Application 🚀

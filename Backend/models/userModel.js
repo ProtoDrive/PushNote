@@ -1,10 +1,10 @@
 const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema({
-  email: { type: String, required: true, unique: true },
-  username: { type: String, required: true },
-  password: { type: String },
-  image: { type: String, default: "" },
+  phone: { type: String, required: true, unique: true },
+  username: { type: String, required: false },
+  image: { type: String, default: "", required: false },
+  activated: { type: Boolean, required: false, default: false },
   task: [
     {
       title: { type: String },

@@ -6,8 +6,9 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const User = require("./models/userModel");
 const dotenv = require("dotenv");
-
-const SECRET_KEY = "super-secret-key";
+const crypto = require("crypto");
+const Jimp = require("jimp");
+const path = require("path");
 
 // connect to express app
 const app = express();
@@ -42,13 +43,12 @@ const multer = require("multer");
 const Message = require("./models/messageModel");
 const Organization = require("./models/organizationModel");
 
-// Configure multer for handling file uploads
+// Create a multer storage instance to specify the destination and filename for uploaded images.
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, "storage/"); // Specify the desired destination folder
+    cb(null, "./storage"); // Specify the desired destination folder
   },
   filename: function (req, file, cb) {
-    // Generate a unique filename for the uploaded file
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
     cb(null, uniqueSuffix + "-" + file.originalname);
   },
@@ -56,68 +56,158 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
+const accountSid = process.env.ACCOUNT_SID;
+const authToken = process.env.AUTH_TOKEN;
+const smsKey = process.env.SMS_SECRET_KEY;
+let twilioNum = process.env.TWILIO_PHONE_NUMBER;
+
+const twilio = require("twilio")(accountSid, authToken);
+
 //Routes
 
 /**
- * Register the user.
+ * Send the OTP.
  * @constructor
- * @param {string} email - The email of the user.
- * @param {string} username - The username of the user.
- * @param {string} password - The password of the user.
- * @param {string} image - The image url of the user.
+ * @param {string} phone - The phone number of the user.
  */
-app.post("/register", async (req, res) => {
+app.post("/sendOTP", async (req, res) => {
+  const { phone } = req.body;
+
+  //logic
+  if (!phone) {
+    return res.status(400).json({ message: "Phone field is required!" });
+  }
+
+  const otp = crypto.randomInt(1000, 9999);
+
+  //hash
+  const ttl = 1000 * 60 * 2; //current exp time 2min
+  const expires = Date.now() + ttl;
+  const data = `${phone}.${otp}.${expires}`;
+  const hash = crypto.createHmac("sha256", smsKey).update(data).digest("hex");
+
+  //send otp
   try {
-    const { email, username, password, image } = req.body;
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const newUser = new User({
-      email,
-      username,
-      password: hashedPassword,
-      image,
+    await twilio.messages.create({
+      to: phone,
+      from: twilioNum,
+      body: `Your PushNote OTP is ${otp}`,
     });
-    await newUser.save();
-    res.status(201).json({
-      message: "User created successfully",
-      name: username,
-      email: email,
-      image: image,
-      id: newUser.id,
+    return res.status(200).json({
+      message: "OTP sent successfully!",
+      hash: `${hash}.${expires}`,
+      phone,
     });
-  } catch (error) {
-    res.status(500).json({ error: "Error signing up" });
+  } catch (err) {
+    console.log(err);
+    return res.status(500).json({ message: "message sending failed" });
   }
 });
 
 /**
- * Login the user.
+ * Verify the OTP.
  * @constructor
- * @param {string} email - The email of the user.
- * @param {string} password - The password of the user.
+ * @param {string} otp - The OTP of the user.
+ * @param {string} hash - The hash of the otp for check expire of otp.
+ * @param {string} phone - The phone number of the user.
  */
-app.post("/login", async (req, res) => {
+app.post("/verifyOTP", async (req, res) => {
+  // Logic to verify the OTP
+  const { otp, hash, phone } = req.body;
+  if (!otp || !hash || !phone) {
+    return res.status(400).json({ message: "All fields are required!" });
+  }
+
+  const [hashedOtp, expires] = hash.split(".");
+  if (Date.now() > +expires) {
+    return res.status(400).json({ message: "OTP expired!" });
+  }
+
+  const data = `${phone}.${otp}.${expires}`;
+
+  const verifyOtp = (hashedOtp, data) => {
+    let computedHash = crypto
+      .createHmac("sha256", smsKey)
+      .update(data)
+      .digest("hex");
+    return computedHash === hashedOtp;
+  };
+
+  const isValid = verifyOtp(hashedOtp, data);
+  if (!isValid) {
+    return res.status(400).json({ message: "Invalid OTP" });
+  }
+
+  let user;
+
   try {
-    const { email, password } = req.body;
-    const user = await User.findOne({ email });
+    user = await User.findOne({ phone });
+
     if (!user) {
-      return res.status(401).json({ error: "Invalid credentials" });
+      const newUser = new User({
+        phone,
+      });
+      await newUser.save();
+      return res.status(201).json({
+        message: "User created successfully",
+        newUser,
+      });
     }
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) {
-      return res.status(401).json({ error: "Invalid credentials" });
+
+    return res.status(200).json({
+      message: "OTP verified successfully",
+      user,
+    });
+  } catch (err) {
+    console.log(err);
+    return res.status(500).json({ message: "DB error" });
+  }
+});
+
+/**
+ * Activate the user (add username and image).
+ * @constructor
+ * @param {string} name - The name of the user.
+ * @param {string} userId - The userId of the user.
+ * @param {string} image - The image of the user.
+ */
+app.post("/activate", upload.single("image"), async (req, res) => {
+  const { name, userId } = req.body;
+
+  if (!name || !userId) {
+    return res.status(400).json({ message: "All fields are required!" });
+  }
+
+  // Check if an image file was uploaded
+  if (!req.file) {
+    return res.status(400).json({ message: "Image file is required!" });
+  }
+
+  const imagePath = req.file.path;
+
+  try {
+    const jimpResp = await Jimp.read(imagePath);
+    jimpResp.resize(150, Jimp.AUTO).write(imagePath);
+  } catch (err) {
+    return res.status(500).json({ message: "Could not process the image" });
+  }
+
+  try {
+    // Update user
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found!" });
     }
-    const token = jwt.sign({ userId: user._id }, SECRET_KEY, {
-      expiresIn: "1hr",
-    });
-    res.json({
-      message: "Login successful",
-      name: user.name,
-      email: user.email,
-      image: user.image,
-      id: user.id,
-    });
-  } catch (error) {
-    res.status(500).json({ error: "Error logging in" });
+
+    user.username = name;
+    user.image = `/${imagePath}`;
+    user.activated = true;
+
+    await user.save();
+
+    return res.status(200).json({ user, auth: true });
+  } catch (err) {
+    return res.status(500).json({ message: "Something went wrong" });
   }
 });
 
