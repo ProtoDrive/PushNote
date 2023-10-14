@@ -7,6 +7,7 @@ const dotenv = require("dotenv");
 const crypto = require("crypto");
 const Jimp = require("jimp");
 const http = require("http");
+const admin = require('firebase-admin');
 
 // connect to express app
 const app = express();
@@ -46,6 +47,37 @@ io.on("connection", (socket) => {
     console.log("A user disconnected");
   });
 });
+
+
+/**
+ * Initializes Firebase Admin SDK with the provided service account credentials
+ * and creates a messaging instance.
+ * @typedef {Object} ServiceAccount
+ * @property {string} type - The type of the service account key.
+ * @property {string} project_id - The Firebase project ID.
+ * @property {string} private_key_id - The private key ID.
+ * @property {string} private_key - The private key.
+ * @property {string} client_email - The client email.
+ * @property {string} client_id - The client ID.
+ * @property {string} auth_uri - The authentication URI.
+ * @property {string} token_uri - The token URI.
+ * @property {string} auth_provider_x509_cert_url - The authentication provider's X.509 certificate URL.
+ * @property {string} client_x509_cert_url - The client's X.509 certificate URL.
+ *
+ * @global
+ * @constant {ServiceAccount} serviceAccount - The service account credentials.
+ * @throws {Error} Will throw an error if there is an issue initializing Firebase Admin SDK.
+ *
+ * @global
+ * @constant {admin.messaging.Messaging} messaging - Firebase Messaging instance for sending push notifications.
+ */
+const serviceAccount = require('firebase_key.json');
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
+// const messaging = admin.messaging();
 
 /**
  * enpoint for storage the file of image using multer package
@@ -717,3 +749,5 @@ app.post("/organization-messages", upload.single("image"), async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
+
+
