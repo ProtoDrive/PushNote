@@ -2,13 +2,11 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const bodyParser = require("body-parser");
-const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
 const User = require("./models/userModel");
 const dotenv = require("dotenv");
 const crypto = require("crypto");
 const Jimp = require("jimp");
-const path = require("path");
+const http = require("http");
 
 // connect to express app
 const app = express();
@@ -35,6 +33,20 @@ mongoose
 app.use(bodyParser.json());
 app.use(cors());
 
+//Socket setup
+const server = http.createServer(app);
+const io = require("socket.io")(server);
+
+io.on("connection", (socket) => {
+  // Handle socket events here
+  console.log("A user connected");
+
+  // Optionally, you can handle disconnections
+  socket.on("disconnect", () => {
+    console.log("A user disconnected");
+  });
+});
+
 /**
  * enpoint for storage the file of image using multer package
  * @constructor
@@ -42,6 +54,7 @@ app.use(cors());
 const multer = require("multer");
 const Message = require("./models/messageModel");
 const Organization = require("./models/organizationModel");
+const organizationMessage = require("./models/organizationMessageModel");
 
 // Create a multer storage instance to specify the destination and filename for uploaded images.
 const storage = multer.diskStorage({
@@ -334,7 +347,7 @@ app.post("/friend-request/accept", async (req, res) => {
     );
 
     sender.sentFriendRequests = sender.sentFriendRequests.filter(
-      (request) => request.toString() !== recepientId.toString
+      (request) => request.toString() !== recepientId.toString()
     );
 
     await sender.save();
@@ -364,6 +377,106 @@ app.get("/accepted-friends/:userId", async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+/**
+ * endpoint to send a organization invite to a user
+ * @constructor
+ * @param {string} senderId - The senderId of the user who send the invite.
+ * @param {array} recipientIds - The recipientIds of the users whom to send invite (it can be one or more).
+ * @param {string} organizationId - The organizationId is organization Id where user to add.
+ */
+app.post("/organization-invite/send", async (req, res) => {
+  const { senderId, recipientIds, organizationId } = req.body;
+
+  if (!Array.isArray(recipientIds)) {
+    return res.status(400).json({ message: "Recipient IDs must be an array" });
+  }
+
+  try {
+    // Iterate through recipientIds and send invitations individually
+    for (const recipientId of recipientIds) {
+      const invitation = {
+        organizationId,
+        senderId,
+        timestamp: new Date(),
+      };
+
+      // Add the organization invitation to the recipient's document
+      await User.findByIdAndUpdate(recipientId, {
+        $push: { organizationInvitations: invitation },
+      });
+    }
+
+    res
+      .status(200)
+      .json({ message: "Organization invitations sent successfully" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+});
+
+/**
+ * endpoint to get all invites user received
+ * @constructor
+ * @param {string} userId - The userId of the user.
+ */
+app.get("/organization-invite/received/:userId", async (req, res) => {
+  const userId = req.params.userId;
+
+  try {
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const organizationInvitations = user.organizationInvitations;
+    res.status(200).json(organizationInvitations);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+});
+
+/**
+ * endpoint to accept organization invites
+ * @constructor
+ * @param {string} userId - The userId of the user.
+ * @param {string} organizationId - The organizationId is organization Id where user to add.
+ */
+app.post("/organization-invite/accept", async (req, res) => {
+  const { userId, organizationId } = req.body;
+
+  try {
+    // Remove the organization invitation from the user's invitations
+    await User.findByIdAndUpdate(userId, {
+      $pull: { organizationInvitations: { organizationId } },
+    });
+
+    // Add the user to the organization
+    await Organization.findByIdAndUpdate(organizationId, {
+      $push: { members: userId },
+    });
+
+    // Add the organization to the user's list of organizations
+    await User.findByIdAndUpdate(userId, {
+      $push: {
+        organizations: {
+          organizationId,
+          role: "member",
+        },
+      },
+    });
+
+    res
+      .status(200)
+      .json({ message: "Organization invitation accepted successfully" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal Server Error" });
   }
 });
 
@@ -512,7 +625,93 @@ app.post("/messages", upload.single("imageFile"), async (req, res) => {
     });
 
     await newMessage.save();
+
+    // Emit the new message to the sender and recipient
+    io.to(senderId).emit("newMessage", newMessage);
+    io.to(recepientId).emit("newMessage", newMessage);
+
     res.status(200).json({ message: "Message sent Successfully" });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+/**
+ * endpoint to send organization Messages and store it in the backend
+ * @constructor
+ * @param {string} senderId - The senderId of the user who sending msg.
+ * @param {string} organizationId - The organizationId of the organization where msg send.
+ * @param {string} messageType - The messageType of msg can be text or image msg.
+ * @param {string} messageText - The messageText is the content of msg.
+ * @param {string} timestamp - The timestamp when msg send.
+ * @param {string} imageUrl - The imageUrl of the msg if it's present.
+ */
+app.post("/organization-messages", upload.single("image"), async (req, res) => {
+  try {
+    const { senderId, organizationId, messageType, messageText } = req.body;
+
+    // Find the organization by organizationId to verify if the sender is a member.
+    const organization = await Organization.findById(organizationId);
+
+    if (!organization) {
+      return res.status(403).json({ error: "Organization not found" });
+    }
+
+    const isAdmin = organization.admin.toString() === senderId.toString();
+    const isMember = organization.members.some(
+      (member) => member.toString() === senderId.toString()
+    );
+
+    if (!isAdmin && !isMember) {
+      return res
+        .status(403)
+        .json({ error: "You are not a member of this organization" });
+    }
+
+    // Create a new group message with the sender's ID, organization's ID, and message type.
+    const newGroupMessage = new organizationMessage({
+      senderId,
+      organizationId,
+      messageType,
+      message: messageText,
+      timestamp: new Date(),
+      imageUrl: messageType === "image" ? req.file.path : null,
+    });
+
+    if (messageType === "image") {
+      if (!req.file) {
+        return res
+          .status(400)
+          .json({ error: "Image file is required for image messages" });
+      }
+
+      // Store the image URL in the message
+      newGroupMessage.imageUrl = req.file.path;
+    }
+
+    await newGroupMessage.save();
+
+    // Push the organization message to the organization's messages
+    organization.organizationMessages.push(newGroupMessage);
+    await organization.save();
+
+    if (organization) {
+      // Emit to all members
+      organization.members.forEach((member) => {
+        io.to(member).emit("newOrganizationMessage", newGroupMessage);
+      });
+
+      // Emit to the admin (if there is an admin)
+      if (organization.admin) {
+        io.to(organization.admin).emit(
+          "newOrganizationMessage",
+          newGroupMessage
+        );
+      }
+    }
+
+    res.status(200).json({ message: "Group message sent Successfully" });
   } catch (error) {
     console.log(error);
     res.status(500).json({ error: "Internal Server Error" });

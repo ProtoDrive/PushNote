@@ -34,6 +34,23 @@ const userSchema = new mongoose.Schema({
       ref: "User",
     },
   ],
+  organizationInvitations: [
+    {
+      organizationId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Organization",
+      },
+      senderId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+      timestamp: Date,
+      accepted: {
+        type: Boolean,
+        default: false,
+      },
+    },
+  ],
   organizations: [
     {
       organizationId: {
