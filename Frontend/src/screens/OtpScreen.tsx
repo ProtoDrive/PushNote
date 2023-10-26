@@ -8,30 +8,66 @@ import {
 } from 'react-native';
 import {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useNavigation} from '@react-navigation/native';
+import {useDispatch, useSelector} from 'react-redux';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Files
 import Spacing from '../components/constants/Spacing';
 import Colors from '../components/constants/Colors';
 import Font from '../components/constants/Font';
 import FontSize from '../components/constants/FontSize';
+import {API_URI} from '../utils/constants';
+
+import {addUser} from '../redux/action';
 
 const numberOfBoxes = 4;
 
 export default function OtpScreen(): JSX.Element {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
+  const dispatch = useDispatch();
+
+  const userData = useSelector((state: any) => state.reducer);
+
   const [countdown, setCountdown] = useState(120); // 2 minutes in seconds
   const [timerRunning, setTimerRunning] = useState(true);
+  const [apiError, setApiError] = React.useState('');
 
   const [otp, setOtp] = useState(['', '', '', '']); // Initialize an array to hold OTP digits
   const inputRefs = useRef<Array<TextInput | null>>([null, null, null, null]);
 
   const handleContinue = () => {
-    console.log('clicked', otp);
-    navigation.navigate('profile');
+    //navigation.navigate('profile');
+    if (otp[3] == '') {
+      setApiError('OTP should contain 4 digits.');
+      return;
+    }
+
+    axios
+      .post(`${API_URI}/verifyOTP`, {
+        otp: otp.join(''),
+        phone: userData.data.phone,
+        hash: userData.data.hash,
+      })
+      .then(response => {
+        setOtp(['', '', '', '']);
+        dispatch(addUser(response.data.user));
+        AsyncStorage.setItem('User', JSON.stringify(response.data.user));
+        if (response.data.user.activated) {
+          navigation.navigate('home');
+        } else {
+          navigation.navigate('profile');
+        }
+      })
+      .catch(error => {
+        console.log(error);
+        setApiError('This OTP is not valid');
+      });
   };
 
   // Function to handle OTP input for each box
   const handleOtpInputChange = (text: string, index: number) => {
+    setApiError('');
     if (index >= 0 && index < numberOfBoxes) {
       const newOtp = [...otp];
       newOtp[index] = text;
@@ -129,6 +165,17 @@ export default function OtpScreen(): JSX.Element {
             />
           ))}
         </View>
+        {apiError && (
+          <Text
+            style={{
+              marginTop: 1,
+              marginBottom: 8,
+              color: Colors.red,
+              fontSize: 14,
+            }}>
+            {apiError}
+          </Text>
+        )}
 
         <TouchableOpacity onPress={resetTimer} style={{marginTop: 20}}>
           <Text

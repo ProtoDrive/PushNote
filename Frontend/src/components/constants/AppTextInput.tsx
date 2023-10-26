@@ -57,7 +57,7 @@ const AppTextInput: React.FC<AppTextInputProps> = ({
         {...otherProps}
       />
       {error && (
-        <Text style={{marginTop: 7, color: Colors.red, fontSize: 12}}>
+        <Text style={{marginTop: 10, color: Colors.red, fontSize: 14}}>
           {error}
         </Text>
       )}

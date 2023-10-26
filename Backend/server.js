@@ -7,12 +7,15 @@ const dotenv = require("dotenv");
 const crypto = require("crypto");
 const Jimp = require("jimp");
 const http = require("http");
-const admin = require('firebase-admin');
+//const admin = require("firebase-admin");
 
 // connect to express app
 const app = express();
 
 dotenv.config();
+
+app.use(express.json({ limit: "50mb", extended: true }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 // connect to mongoDB
 const dbURI = process.env.MONGO_URI;
@@ -48,34 +51,33 @@ io.on("connection", (socket) => {
   });
 });
 
+// /**
+//  * Initializes Firebase Admin SDK with the provided service account credentials
+//  * and creates a messaging instance.
+//  * @typedef {Object} ServiceAccount
+//  * @property {string} type - The type of the service account key.
+//  * @property {string} project_id - The Firebase project ID.
+//  * @property {string} private_key_id - The private key ID.
+//  * @property {string} private_key - The private key.
+//  * @property {string} client_email - The client email.
+//  * @property {string} client_id - The client ID.
+//  * @property {string} auth_uri - The authentication URI.
+//  * @property {string} token_uri - The token URI.
+//  * @property {string} auth_provider_x509_cert_url - The authentication provider's X.509 certificate URL.
+//  * @property {string} client_x509_cert_url - The client's X.509 certificate URL.
+//  *
+//  * @global
+//  * @constant {ServiceAccount} serviceAccount - The service account credentials.
+//  * @throws {Error} Will throw an error if there is an issue initializing Firebase Admin SDK.
+//  *
+//  * @global
+//  * @constant {admin.messaging.Messaging} messaging - Firebase Messaging instance for sending push notifications.
+//  */
+// const serviceAccount = require("firebase_key.json");
 
-/**
- * Initializes Firebase Admin SDK with the provided service account credentials
- * and creates a messaging instance.
- * @typedef {Object} ServiceAccount
- * @property {string} type - The type of the service account key.
- * @property {string} project_id - The Firebase project ID.
- * @property {string} private_key_id - The private key ID.
- * @property {string} private_key - The private key.
- * @property {string} client_email - The client email.
- * @property {string} client_id - The client ID.
- * @property {string} auth_uri - The authentication URI.
- * @property {string} token_uri - The token URI.
- * @property {string} auth_provider_x509_cert_url - The authentication provider's X.509 certificate URL.
- * @property {string} client_x509_cert_url - The client's X.509 certificate URL.
- *
- * @global
- * @constant {ServiceAccount} serviceAccount - The service account credentials.
- * @throws {Error} Will throw an error if there is an issue initializing Firebase Admin SDK.
- *
- * @global
- * @constant {admin.messaging.Messaging} messaging - Firebase Messaging instance for sending push notifications.
- */
-const serviceAccount = require('firebase_key.json');
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
+// admin.initializeApp({
+//   credential: admin.credential.cert(serviceAccount),
+// });
 
 // const messaging = admin.messaging();
 
@@ -87,6 +89,7 @@ const multer = require("multer");
 const Message = require("./models/messageModel");
 const Organization = require("./models/organizationModel");
 const organizationMessage = require("./models/organizationMessageModel");
+const Task = require("./models/TaskModel");
 
 // Create a multer storage instance to specify the destination and filename for uploaded images.
 const storage = multer.diskStorage({
@@ -136,7 +139,7 @@ app.post("/sendOTP", async (req, res) => {
     await twilio.messages.create({
       to: phone,
       from: twilioNum,
-      body: `Your PushNote OTP is ${otp}`,
+      body: `Your Planitar OTP is ${otp}`,
     });
     return res.status(200).json({
       message: "OTP sent successfully!",
@@ -195,7 +198,7 @@ app.post("/verifyOTP", async (req, res) => {
       await newUser.save();
       return res.status(201).json({
         message: "User created successfully",
-        newUser,
+        user: newUser,
       });
     }
 
@@ -216,25 +219,11 @@ app.post("/verifyOTP", async (req, res) => {
  * @param {string} userId - The userId of the user.
  * @param {string} image - The image of the user.
  */
-app.post("/activate", upload.single("image"), async (req, res) => {
-  const { name, userId } = req.body;
+app.post("/activate", async (req, res) => {
+  const { name, userId, image, bio } = req.body;
 
   if (!name || !userId) {
     return res.status(400).json({ message: "All fields are required!" });
-  }
-
-  // Check if an image file was uploaded
-  if (!req.file) {
-    return res.status(400).json({ message: "Image file is required!" });
-  }
-
-  const imagePath = req.file.path;
-
-  try {
-    const jimpResp = await Jimp.read(imagePath);
-    jimpResp.resize(150, Jimp.AUTO).write(imagePath);
-  } catch (err) {
-    return res.status(500).json({ message: "Could not process the image" });
   }
 
   try {
@@ -245,13 +234,15 @@ app.post("/activate", upload.single("image"), async (req, res) => {
     }
 
     user.username = name;
-    user.image = `/${imagePath}`;
+    user.image = image;
+    user.bio = bio;
     user.activated = true;
 
     await user.save();
 
     return res.status(200).json({ user, auth: true });
   } catch (err) {
+    console.log(err);
     return res.status(500).json({ message: "Something went wrong" });
   }
 });
@@ -522,7 +513,7 @@ app.post("/organization-invite/accept", async (req, res) => {
  */
 app.post("/organizations", async (req, res) => {
   try {
-    const { name, image, members, admin } = req.body;
+    const { name, image, members, admin, bio } = req.body;
 
     // Create a new organization
     const newOrganization = new Organization({
@@ -530,48 +521,81 @@ app.post("/organizations", async (req, res) => {
       image,
       members: [],
       admin,
+      bio,
     });
-
-    // Validate and add members
-    const validMembers = [];
-
-    for (const memberId of members) {
-      const user = await User.findById(memberId);
-
-      if (user) {
-        validMembers.push(memberId);
-        // Update the user's data to include the organization
-        user.organizations.push({
-          organizationId: newOrganization._id,
-          role: memberId === admin ? "admin" : "member",
-        });
-        await user.save();
-      }
-    }
-
-    // Update the organization with the valid members
-    newOrganization.members = validMembers;
 
     // Save the organization to the database
     await newOrganization.save();
+
+    // Validate and send organization invitations to members
+    for (const member of members) {
+      // Check if the member exists in the database
+      let existingUser = await User.findOne({ phone: `+${member}` });
+
+      if (!existingUser) {
+        // If the user does not exist, create a new user with the provided phone number
+        existingUser = new User({
+          phone: `+${member}`,
+        });
+
+        await existingUser.save();
+      }
+
+      // Send an organization invitation to the member
+      const invitation = {
+        organizationId: newOrganization._id,
+        senderId: admin, // Assuming the admin is sending the invitations
+        timestamp: new Date(),
+      };
+
+      await User.findByIdAndUpdate(existingUser._id, {
+        $push: { organizationInvitations: invitation },
+      });
+    }
 
     // Update the admin's data to include the organization
     const adminUser = await User.findById(admin);
     if (adminUser) {
       adminUser.organizations.push({
         organizationId: newOrganization._id,
-        role: "admin",
+        role: "admin", // Assuming the admin has an "admin" role
       });
       await adminUser.save();
     }
 
     res.status(201).json({
-      message: "Organization created successfully",
+      message: "Organization created successfully, invitations sent",
       organization: newOrganization,
     });
   } catch (error) {
     console.error("Error creating organization:", error);
     res.status(500).json({ error: "Error creating organization" });
+  }
+});
+
+/**
+ * Get an organization by its ID.
+ * @constructor
+ * @param {string} organizationId - The ID of the organization.
+ */
+app.get("/organizations/:organizationId", async (req, res) => {
+  const organizationId = req.params.organizationId;
+
+  try {
+    // Find the organization by ID
+    const organization = await Organization.findById(organizationId);
+
+    if (!organization) {
+      return res.status(404).json({ message: "Organization not found" });
+    }
+
+    // You may want to populate the members and admin fields with user details
+    // for a more complete response.
+
+    res.status(200).json({ organization });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal Server Error" });
   }
 });
 
@@ -584,22 +608,22 @@ app.post("/organizations", async (req, res) => {
  * @param {string} createdTime - The time of the task created.
  * @param {string} deadlineTime - The deadline of the task.
  * @param {string} assigned - The task assigned to user.
+ * @param {string} creatorUserId - The task creator.
  */
-app.post("/tasks/:userId", async (req, res) => {
+app.post("/tasks", async (req, res) => {
   try {
-    const creatorUserId = req.params.userId;
-    const { title, content, status, createdTime, deadlineTime, assigned } =
-      req.body;
+    const {
+      title,
+      content,
+      status,
+      createdTime,
+      deadlineTime,
+      assigned,
+      creatorUserId,
+    } = req.body;
 
-    // Find the creator user by userId
-    const creatorUser = await User.findById(creatorUserId);
-
-    if (!creatorUser) {
-      return res.status(404).json({ error: "Creator user not found" });
-    }
-
-    // Create a new task with the assigned user's ObjectId
-    const newTask = {
+    // Create a new task
+    const task = new Task({
       title,
       content,
       status,
@@ -607,29 +631,90 @@ app.post("/tasks/:userId", async (req, res) => {
       deadlineTime,
       assigned,
       createdBy: creatorUserId,
-    };
+    });
 
-    // Push the task's ObjectId to the creator user's task array
-    creatorUser.task.push(newTask);
-    await creatorUser.save();
+    // Save the task to the database
+    await task.save();
 
-    // Find the assigned user by userId
-    const assignedUser = await User.findById(assigned);
+    // Find the creator user by their ID
+    const assignUser = await User.findById(assigned);
 
-    if (!assignedUser) {
-      return res.status(404).json({ error: "Assigned user not found" });
+    if (!assignUser) {
+      return res.status(404).json({ error: "Creator user not found" });
     }
 
-    // Push the task's ObjectId to the assigned user's task array
-    assignedUser.task.push(newTask);
-    await assignedUser.save();
+    // Add the task to the user's task list
+    assignUser.task.push({ taskId: task._id });
+    await assignUser.save();
 
-    res
-      .status(201)
-      .json({ message: "Task created successfully", task: newTask });
+    // Find the creator user by their ID
+    const creatorUser = await User.findById(creatorUserId);
+
+    if (!creatorUser) {
+      return res.status(404).json({ error: "Creator user not found" });
+    }
+
+    // Add the task to the user's task list
+    creatorUser.task.push({ taskId: task._id });
+    await creatorUser.save();
+
+    res.status(201).json({ message: "Task created successfully", task });
   } catch (error) {
     console.error("Error creating task:", error);
     res.status(500).json({ error: "Error creating task" });
+  }
+});
+
+/**
+ * Get a task by ID
+ * @constructor
+ * @param {string} taskId - The taskId of the task.
+ */
+app.get("/tasks/:taskId", async (req, res) => {
+  try {
+    const taskId = req.params.taskId;
+
+    // Find the task by its ID
+    const task = await Task.findById(taskId);
+
+    if (!task) {
+      return res.status(404).json({ error: "Task not found" });
+    }
+
+    res.status(200).json(task);
+  } catch (error) {
+    console.error("Error retrieving task:", error);
+    res.status(500).json({ error: "Error retrieving task" });
+  }
+});
+
+/**
+ * Update the status of a task
+ * @constructor
+ * @param {string} taskId - The ID of the task to update.
+ */
+app.put("/tasks/:taskId", async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const { status } = req.body;
+
+    // Find the task by taskId and update its status
+    const updatedTask = await Task.findByIdAndUpdate(
+      taskId,
+      { status },
+      { new: true }
+    );
+
+    if (!updatedTask) {
+      return res.status(404).json({ error: "Task not found" });
+    }
+
+    res
+      .status(200)
+      .json({ message: "Task status updated successfully", task: updatedTask });
+  } catch (error) {
+    console.error("Error updating task status:", error);
+    res.status(500).json({ error: "Error updating task status" });
   }
 });
 
@@ -643,9 +728,16 @@ app.post("/tasks/:userId", async (req, res) => {
  * @param {string} timestamp - The timestamp when msg send.
  * @param {string} imageUrl - The imageUrl of the msg if it's present.
  */
-app.post("/messages", upload.single("imageFile"), async (req, res) => {
+app.post("/messages", async (req, res) => {
   try {
-    const { senderId, recepientId, messageType, messageText } = req.body;
+    const { senderId, recepientId, messageType, messageText, image, taskId } =
+      req.body;
+
+    const task = await Task.findById(taskId);
+
+    if (!task) {
+      return res.status(404).json({ error: "Task not found" });
+    }
 
     const newMessage = new Message({
       senderId,
@@ -653,10 +745,15 @@ app.post("/messages", upload.single("imageFile"), async (req, res) => {
       messageType,
       message: messageText,
       timestamp: new Date(),
-      imageUrl: messageType === "image" ? req.file.path : null,
+      imageUrl: image,
+      taskId: taskId,
     });
 
     await newMessage.save();
+
+    // Push the organization message to the organization's messages
+    task.taskMessages.push(newMessage);
+    await task.save();
 
     // Emit the new message to the sender and recipient
     io.to(senderId).emit("newMessage", newMessage);
@@ -665,6 +762,57 @@ app.post("/messages", upload.single("imageFile"), async (req, res) => {
     res.status(200).json({ message: "Message sent Successfully" });
   } catch (error) {
     console.log(error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+/**
+ * Get messages by taskId
+ * @constructor
+ * @param {string} taskId - The ID of the task to retrieve messages for.
+ */
+app.get("/messages/:taskId", async (req, res) => {
+  try {
+    const taskId = req.params.taskId;
+
+    // Find the task by taskId
+    const task = await Task.findById(taskId);
+
+    if (!task) {
+      return res.status(404).json({ error: "Task not found" });
+    }
+
+    // Find messages associated with the task
+    const messages = await Message.find({
+      taskId: task._id,
+    }).sort({ timestamp: 1 });
+
+    res.status(200).json({ messages });
+  } catch (error) {
+    console.error("Error retrieving messages:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+/**
+ * Get a message by ID
+ * @constructor
+ * @param {string} messageId - The ID of the message to retrieve.
+ */
+app.get("/message/:messageId", async (req, res) => {
+  try {
+    const messageId = req.params.messageId;
+
+    // Find the message by messageId
+    const message = await Message.findById(messageId);
+
+    if (!message) {
+      return res.status(404).json({ error: "Message not found" });
+    }
+
+    res.status(200).json({ message });
+  } catch (error) {
+    console.error("Error retrieving the message:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
@@ -679,9 +827,10 @@ app.post("/messages", upload.single("imageFile"), async (req, res) => {
  * @param {string} timestamp - The timestamp when msg send.
  * @param {string} imageUrl - The imageUrl of the msg if it's present.
  */
-app.post("/organization-messages", upload.single("image"), async (req, res) => {
+app.post("/organization-messages", async (req, res) => {
   try {
-    const { senderId, organizationId, messageType, messageText } = req.body;
+    const { senderId, organizationId, messageType, messageText, image } =
+      req.body;
 
     // Find the organization by organizationId to verify if the sender is a member.
     const organization = await Organization.findById(organizationId);
@@ -708,19 +857,8 @@ app.post("/organization-messages", upload.single("image"), async (req, res) => {
       messageType,
       message: messageText,
       timestamp: new Date(),
-      imageUrl: messageType === "image" ? req.file.path : null,
+      imageUrl: image,
     });
-
-    if (messageType === "image") {
-      if (!req.file) {
-        return res
-          .status(400)
-          .json({ error: "Image file is required for image messages" });
-      }
-
-      // Store the image URL in the message
-      newGroupMessage.imageUrl = req.file.path;
-    }
 
     await newGroupMessage.save();
 
@@ -750,4 +888,57 @@ app.post("/organization-messages", upload.single("image"), async (req, res) => {
   }
 });
 
+/**
+ * Get all organization messages for a specific organization.
+ * @constructor
+ * @param {string} organizationId - The ID of the organization.
+ */
+app.get("/organization-messages/:organizationId", async (req, res) => {
+  try {
+    const organizationId = req.params.organizationId;
 
+    // Find the organization by ID
+    const organization = await Organization.findById(organizationId);
+
+    if (!organization) {
+      return res.status(404).json({ message: "Organization not found" });
+    }
+
+    // Fetch all organization messages for the specified organization
+    const organizationMessages = await organizationMessage
+      .find({
+        organizationId: organization._id,
+      })
+      .sort({ timestamp: 1 }); // You can change the sort order as needed
+
+    res.status(200).json({ organizationMessages });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+});
+
+/**
+ * Get an organization message by its ID.
+ * @constructor
+ * @param {string} messageId - The ID of the organization message.
+ */
+app.get("/organization-messages/message/:messageId", async (req, res) => {
+  try {
+    const messageId = req.params.messageId;
+
+    // Find the organization message by ID
+    const message = await organizationMessage.findById(messageId);
+
+    if (!message) {
+      return res
+        .status(404)
+        .json({ message: "Organization message not found" });
+    }
+
+    res.status(200).json({ message });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+});

@@ -17,7 +17,7 @@ const data: OnboardingData[] = [
     subtext:
       'Empower your team to excel with seamless collaboration and productivity tools.',
     textColor: 'white',
-    backgroundColor: '#FFBB5C',
+    backgroundColor: '#FFB84C',
   },
   {
     id: 2,
@@ -34,7 +34,7 @@ const data: OnboardingData[] = [
     subtext:
       "Master the art of effective meeting scheduling, collaboration, and follow-up actions for your team's success.",
     textColor: 'white',
-    backgroundColor: '#BC7AF9',
+    backgroundColor: '#FF8551',
   },
 ];
 
