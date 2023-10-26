@@ -15,7 +15,7 @@ const organizationMessageSchema = new mongoose.Schema({
     type: String,
     enum: ["text", "image"],
   },
-  message: String,
+  message: { type: String, required: false },
   imageUrl: String,
   timestamp: {
     type: Date,

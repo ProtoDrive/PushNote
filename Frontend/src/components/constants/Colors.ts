@@ -6,6 +6,7 @@ const gray = '#ECECEC';
 const lightBlue = '#f1f4ff';
 const red = 'red';
 const orange = '#FF6B6B';
+const lightblack = '#1E1E1E';
 
 export default {
   darkText: dark,
@@ -19,4 +20,5 @@ export default {
   gray: gray,
   red: red,
   theme: orange,
+  backgroundColor: lightblack,
 };

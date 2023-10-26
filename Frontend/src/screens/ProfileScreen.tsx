@@ -2,6 +2,10 @@ import {View, Text, Image, TouchableOpacity, SafeAreaView} from 'react-native';
 import React, {useState} from 'react';
 import {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useNavigation} from '@react-navigation/native';
+import {launchImageLibrary} from 'react-native-image-picker';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {useDispatch, useSelector} from 'react-redux';
 
 //Files
 import AppTextInput from '../components/constants/AppTextInput';
@@ -9,27 +13,64 @@ import Spacing from '../components/constants/Spacing';
 import Colors from '../components/constants/Colors';
 import Font from '../components/constants/Font';
 import FontSize from '../components/constants/FontSize';
+import {API_URI} from '../utils/constants';
+
+import {addUser} from '../redux/action';
 
 export default function ProfileScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
+  const dispatch = useDispatch();
 
-  const [imageSource, setImageSource] = useState(null);
+  const userData = useSelector((state: any) => state.reducer);
+
+  const [apiError, setApiError] = React.useState('');
+  const [imageSource, setImageSource] = useState(
+    require('../../assets/Profile/nodp.png'),
+  );
   const [name, setName] = useState('');
   const [bio, setBio] = useState('');
+  const [imgFile, setImgFile] = useState(
+    require('../../assets/Profile/nodp.png'),
+  );
 
-  const selectImage = () => {
-    const options = {
-      title: 'Select Profile Image',
-      storageOptions: {
-        skipBackup: true,
-        path: 'images',
-      },
-    };
+  const selectImage = async () => {
+    const result = await launchImageLibrary({
+      mediaType: 'photo',
+      quality: 1,
+      includeBase64: true,
+    });
+    if (result?.assets) {
+      setImageSource({
+        uri: `data:image/png;base64,${result?.assets[0]?.base64}`,
+      });
+      setImgFile(result?.assets[0]?.base64);
+    }
   };
 
   const saveProfile = () => {
-    console.log('profile', name, bio);
-    navigation.navigate('home');
+    if (!name) {
+      setApiError('Name is required');
+    }
+
+    axios
+      .post(`${API_URI}/activate`, {
+        name: name,
+        image: imgFile,
+        userId: userData.data._id,
+        bio: bio,
+      })
+      .then(response => {
+        setName('');
+        setBio('');
+        setImageSource(require('../../assets/Profile/nodp.png'));
+        dispatch(addUser(response.data.user));
+        AsyncStorage.setItem('User', JSON.stringify(response.data.user));
+        navigation.navigate('home');
+      })
+      .catch(error => {
+        console.log(error);
+        setApiError('Internal server error.');
+      });
   };
 
   return (
@@ -38,7 +79,7 @@ export default function ProfileScreen() {
         <View style={{justifyContent: 'center', alignItems: 'center'}}>
           <TouchableOpacity onPress={selectImage}>
             <Image
-              source={require('../../assets/Profile/nodp.png')}
+              source={imageSource}
               style={{width: 200, height: 200, borderRadius: 100}}
             />
             <Image
@@ -47,8 +88,8 @@ export default function ProfileScreen() {
                 width: 35,
                 height: 35,
                 position: 'relative',
-                top: -30,
-                left: 140,
+                top: -25,
+                left: 135,
               }}
             />
           </TouchableOpacity>
@@ -66,7 +107,11 @@ export default function ProfileScreen() {
           <AppTextInput
             placeholder="Your Name"
             value={name}
-            onChangeText={text => setName(text)}
+            onChangeText={text => {
+              setName(text);
+              setApiError('');
+            }}
+            error={apiError}
           />
         </View>
 
@@ -80,7 +125,7 @@ export default function ProfileScreen() {
             Bio
           </Text>
           <AppTextInput
-            placeholder="Bio"
+            placeholder="Tell us about yourself"
             value={bio}
             onChangeText={text => setBio(text)}
             height={150}
